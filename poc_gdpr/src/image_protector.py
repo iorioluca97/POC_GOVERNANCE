@@ -81,12 +81,11 @@ def display_image(img):
   display(Image.fromarray(image_np))
 
 
-# # Example usage
-# img = get_image('https://images.pexels.com/photos/3812743/pexels-photo-3812743.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1')
-
-# image_protector = ImageProtector("./data/input_images/input_image.jpg")
-# image_protector.blur_faces()
-# image_protector.pixellate_faces()
+# Example usage
+img = get_image('https://images.pexels.com/photos/3812743/pexels-photo-3812743.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1')
+image_protector = ImageProtector("./data/input_images/input_image.jpg")
+image_protector.blur_faces()
+image_protector.pixellate_faces()
 
 
 

@@ -1,9 +1,16 @@
 import yaml
 from poc_gdpr.config.logger import logger
+from presidio_anonymizer.entities import OperatorConfig
 
 LANGUAGE_CONFIG_PATH : str = 'poc_gdpr/config/languages-config.yml'
 DEFAULT_LANGUAGE : str = 'it'  # Default language is Italian
-
+ENCRYPTION_KEY = "a1b2c3d4e5f6g7h8"  # Example encryption key
+ENCRYPT_OPERATOR = {
+    "DEFAULT": OperatorConfig("encrypt", {"key": ENCRYPTION_KEY}),
+}
+DECRYPT_OPERATOR = {
+    "DEFAULT": OperatorConfig("decrypt", {"key": ENCRYPTION_KEY}),
+}
 def create_languages_config():
     """
     Create a configuration for Presidio NER engine with Spacy Italian model.
@@ -46,12 +53,20 @@ def create_languages_config():
             ]
         }
     }
-
+    #Check if the file already exists
+    try:
+        with open(LANGUAGE_CONFIG_PATH, 'r') as file:
+            existing_config = yaml.safe_load(file)
+            if existing_config == config:
+                logger.info("languages-config.yml already exists and is up to date.")
+                return
+    except FileNotFoundError:
+        logger.warning("languages-config.yml not found. Creating a new one.")
     # Write the configuration to a YAML file
     with open(LANGUAGE_CONFIG_PATH, 'w') as file:
         yaml.dump(config, file, default_flow_style=False, sort_keys=False)
 
-    print("Successfully created languages-config.yml with the updated configuration")
+    logger.info("Successfully created languages-config.yml with the updated configuration")
 
 def download_spacy_model():
     """

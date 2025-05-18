@@ -1,14 +1,25 @@
-from presidio_analyzer import AnalyzerEngine, EntityRecognizer
+import json
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 from presidio_analyzer import AnalyzerEngine
 from presidio_analyzer.nlp_engine import NlpEngineProvider
-from presidio_anonymizer import AnonymizerEngine, DeanonymizeEngine
 from presidio_anonymizer.entities import OperatorConfig
+from presidio_anonymizer import AnonymizerEngine, DeanonymizeEngine, OperatorConfig
+from presidio_anonymizer.operators import Operator, OperatorType
+from pydantic import ValidationError
 
-from poc_gdpr.config.cfg import create_languages_config, download_spacy_model, LANGUAGE_CONFIG_PATH, DEFAULT_LANGUAGE
+from poc_gdpr.config.cfg import (
+    create_languages_config,
+    download_spacy_model,
+    LANGUAGE_CONFIG_PATH,
+    DEFAULT_LANGUAGE,
+    ENCRYPTION_KEY,
+    ENCRYPT_OPERATOR,
+    DECRYPT_OPERATOR,
+)
 from poc_gdpr.config.logger import logger
+from typing import Dict
 
-from transformers import pipeline
+
 
 
 class TextProtector:
@@ -46,121 +57,186 @@ class TextProtector:
 
         return results
     
-    def anonymize_text_with_entities(self, text):        
-        results = self.analyzer.analyze(text=text, language=self.language)
-        # Anonymize the previously detected entities
-        return self.anonymizer.anonymize(text=text, analyzer_results=results)
-        
-
-    def anonymize_text(self, 
-        text,
-        encryption_key="a1b2c3d4e5f6g7h8",  # 16-character key
-        operator="encrypt",):
-
-        results = self.analyzer.analyze(text=text, language=self.language)
-
+    def anonymize_text_with_encryption(self, text, encryption_key=ENCRYPTION_KEY):
+        # Anonymize the text with encryption
         return self.anonymizer.anonymize(
             text=text,
-            analyzer_results=results,
             operators={
-            "DEFAULT": OperatorConfig(operator, {"key": encryption_key}),
+                ENCRYPT_OPERATOR: OperatorConfig(ENCRYPT_OPERATOR, {"key": encryption_key}),
+                DECRYPT_OPERATOR: OperatorConfig(DECRYPT_OPERATOR, {"key": encryption_key}),
             }
         )
-
-    def deanonymize_text(self, text, entities, encryption_key="a1b2c3d4e5f6g7h8", operator="decrypt"):
-        # De-anonymize the text using the same key and operator
-        return self.deanonymizer.deanonymize(
-            text=text, # from anonymized_result.text,
-            entities=entities, # from anonymized_result.items,
-            operators={
-                "DEFAULT": OperatorConfig(operator, {"key": encryption_key}),
-            }
-        )
-
-
-
-class HFTransformersRecognizer(EntityRecognizer):
-    def __init__(
-        self,
-        model_id_or_path=None,
-        aggregation_strategy="simple",
-        supported_language=DEFAULT_LANGUAGE,
-        ignore_labels=["O", "MISC"],
-    ):
-        # inits transformers pipeline for given mode or path
-        self.pipeline = pipeline(
-            "token-classification", model=model_id_or_path, aggregation_strategy=aggregation_strategy, ignore_labels=ignore_labels
-        )
-
-        # Complete mapping for numeric labels and traditional NER labels
-        self.label2presidio = {
-            # Traditional NER labels
-            "PER": "PERSON",
-            "LOC": "LOCATION",
-            "ORG": "ORGANIZATION",
-            "PERSON": "PERSON",
-            "LOCATION": "LOCATION",
-            "ORGANIZATION": "ORGANIZATION",
-
-            # Numeric labels - adjust these to match your model's output
-            "LABEL_0": "PERSON",
-            "LABEL_1": "LOCATION",
-            "LABEL_2": "ORGANIZATION",
-            "LABEL_3": "DATE_TIME",
-            "LABEL_4": "EMAIL_ADDRESS",
-            "LABEL_5": "PHONE_NUMBER",
-            "LABEL_6": "CREDIT_CARD",
-            "LABEL_7": "IBAN_CODE",
-            "LABEL_8": "IP_ADDRESS",
-        }
-
-        # passes entities from model into parent class
-        super().__init__(supported_entities=list(self.label2presidio.values()), supported_language=supported_language)
-
-
-
-# if __name__ == "__main__":
-#     text = """
-#     Ciao, mi chiamo Mario Rossi e vivo a Roma. Il mio numero di telefono è 1234567890 e la mia email è
-#     mariorossi@gmail.com, mentre il mio codice fiscale è RSSMRA85M01H501Z.
-#     Ho un appuntamento il 15 marzo 2023 alle 14:30 presso l'ufficio di Milano.
-
-#     Il mio numero di previdenza sociale è 987654321 e il mio numero di patente è ABC1234567.
-#     """
-
-#     text_protector = TextProtector(language="it")
-
-
-#     logger.info("Analyzing text...")
-
     
-#     results = text_protector.analyze_text(text)
-#     logger.info(results)
-    #         # Print detected entities
-    # for result in results:
-    #     print(f"Entity: {result.entity_type}, Text: {text[result.start:result.end]}, Score: {result.score}")
+    def deanonymize_text_with_encryption(self, text, encryption_key=ENCRYPTION_KEY):
+        # De-anonymize the text with encryption
+        return self.deanonymizer.deanonymize(
+            text=text,
+            operators={
+                ENCRYPT_OPERATOR: OperatorConfig(ENCRYPT_OPERATOR, {"key": encryption_key}),
+                DECRYPT_OPERATOR: OperatorConfig(DECRYPT_OPERATOR, {"key": encryption_key}),
+            }
+        )
+    
+class InstanceCounterAnonymizer(Operator):
+    """
+    Anonymizer which replaces the entity value
+    with an instance counter per entity.
+    """
 
-    # anonymized_result = text_protector.anonymize_text(text)
-    # print("ANONYMIZED: ", anonymized_result.text)
-    # # print("ANONYMIZED ENTITIES: ", anonymized_result.items)
-    # de_anonymized_result = text_protector.deanonymize_text(
-    #     text=anonymized_result.text,
-    #     entities=anonymized_result.items
-    # )
-    # print("DE-ANONYMIZED: ", de_anonymized_result.text)
-    # print("DE-ANONYMIZED ENTITIES: ", de_anonymized_result.items)
-    # print("ANONYMIZED ENTITIES: ", anonymized_result.items)
+    REPLACING_FORMAT = "<{entity_type}_{index}>"
+
+    def operate(self, text: str, params: Dict = None) -> str:
+        """Anonymize the input text."""
+
+        entity_type: str = params["entity_type"]
+
+        # entity_mapping is a dict of dicts containing mappings per entity type
+        entity_mapping: Dict[Dict:str] = params["entity_mapping"]
+
+        entity_mapping_for_type = entity_mapping.get(entity_type)
+        if not entity_mapping_for_type:
+            new_text = self.REPLACING_FORMAT.format(
+                entity_type=entity_type, index=0
+            )
+            entity_mapping[entity_type] = {}
+
+        else:
+            if text in entity_mapping_for_type:
+                return entity_mapping_for_type[text]
+
+            previous_index = self._get_last_index(entity_mapping_for_type)
+            new_text = self.REPLACING_FORMAT.format(
+                entity_type=entity_type, index=previous_index + 1
+            )
+
+        entity_mapping[entity_type][text] = new_text
+        return new_text
+
+    @staticmethod
+    def _get_last_index(entity_mapping_for_type: Dict) -> int:
+        """Get the last index for a given entity type."""
+
+        def get_index(value: str) -> int:
+            return int(value.split("_")[-1][:-1])
+
+        indices = [get_index(v) for v in entity_mapping_for_type.values()]
+        return max(indices)
+
+    def validate(self, params: Dict = None) -> None:
+        """Validate operator parameters."""
+
+        if "entity_mapping" not in params:
+            raise ValueError("An input Dict called `entity_mapping` is required.")
+        if "entity_type" not in params:
+            raise ValueError("An entity_type param is required.")
+
+    def operator_name(self) -> str:
+        return "entity_counter"
+
+    def operator_type(self) -> OperatorType:
+        return OperatorType
+
+class InstanceCounterDeanonymizer(Operator):
+    """
+    Deanonymizer which replaces the unique identifier 
+    with the original text.
+    """
+
+    def operate(self, text: str, params: Dict = None) -> str:
+        """Anonymize the input text."""
+
+        entity_type: str = params["entity_type"]
+
+        # entity_mapping is a dict of dicts containing mappings per entity type
+        entity_mapping: Dict[Dict:str] = params["entity_mapping"]
+
+        if entity_type not in entity_mapping:
+            raise ValueError(f"Entity type {entity_type} not found in entity mapping!")
+        if text not in entity_mapping[entity_type].values():
+            raise ValueError(f"Text {text} not found in entity mapping for entity type {entity_type}!")
+
+        return self._find_key_by_value(entity_mapping[entity_type], text)
+
+    @staticmethod
+    def _find_key_by_value(entity_mapping, value):
+        for key, val in entity_mapping.items():
+            if val == value:
+                return key
+        return None
+    
+    def validate(self, params: Dict = None) -> None:
+        """Validate operator parameters."""
+
+        if "entity_mapping" not in params:
+            raise ValueError("An input Dict called `entity_mapping` is required.")
+        if "entity_type" not in params:
+            raise ValueError("An entity_type param is required.")
+
+    def operator_name(self) -> str:
+        return "entity_counter_deanonymizer"
+
+    def operator_type(self) -> OperatorType:
+        return OperatorType.Deanonymize
+
+class JsonValidator():
+    def __init__(self, 
+        pydantic_model_not_validated=None,
+        pydantic_model_validated=None,
+        raw_json=None,
+        entity_mapping=None,
+        ):
+        self.pydantic_model_not_validated = pydantic_model_not_validated
+        self.pydantic_model_validated = pydantic_model_validated
+        self.raw_json = self._clean(raw_json)
+        self.entity_mapping = entity_mapping
 
 
-    ##########################################################
-    # italian_model = "dbmdz/bert-base-italian-xxl-cased"  # or another Italian language model
-    # transformers_recognizer = HFTransformersRecognizer(italian_model, supported_language="it")
-    # text_protector.analyzer.registry.add_recognizer(transformers_recognizer)
+    def _clean(self, raw_json):
+        cleaned_json = raw_json.replace("```json", "").replace("```", "")
+        return json.loads(cleaned_json)
+    
+    def validate(self,) -> dict:
+        """
+        Validate the text.
+        :return: True if valid, False otherwise.
+        """
+        # First validation
+        data = self._first_validation(self.raw_json)
+        if not data:
+            return {}
 
-    # results = text_protector.analyzer.analyze(
-    # text=text,
-    # entities=["PERSON", "LOCATION", "ORGANIZATION", "PHONE_NUMBER", "EMAIL_ADDRESS", "CREDIT_CARD", "IT_FISCAL_CODE"],
-    # language="it"
-    # )
+        # Second validation
+        data = self._second_validation(data, self.entity_mapping)
 
-    # print(results)
+        return data
+
+
+    def _first_validation(self, data: dict) -> dict:
+        """
+        Validate the text.
+        :param text: The text to validate.
+        :return: True if valid, False otherwise.
+        """
+        try:
+            data = self.pydantic_model_not_validated(**data)
+            return data.__dict__
+        except ValidationError as e:
+            logger.error(f"Validation error: {e}")
+            return {}
+        
+    def _second_validation(self, data: dict, entity_mapping: dict) -> dict:
+        data_copy = data.copy()
+        entity_mapping_copy = entity_mapping.copy()
+
+        for entity_value  in entity_mapping_copy.values():
+            for value, _type in entity_value.items():
+                for key, val in data.items():
+                    if val == _type:
+                        data_copy[key] = value
+
+        try:
+            data = self.pydantic_model_validated(**data_copy)
+            return data.__dict__
+        except ValidationError as e:
+            logger.error(f"Validation error: {e}")
+            return {}

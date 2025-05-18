@@ -16,6 +16,8 @@ ipython = "^9.2.0"
 transformers = "^4.51.3"
 torch = "^2.7.0"
 coloredlogs = "^15.0.1"
+openai-agents = "^0.0.15"
+great-expectations = "^1.4.4"
 
 
 [build-system]
