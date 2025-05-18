@@ -1,0 +1,63 @@
+# cache
+*__pycache__/
+data/
+
+
+
+# Notebook
+demo_great_expectations.ipynb
+
+# Immagini
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Cartelle e file di sistema
+.DS_Store
+Thumbs.db
+
+# File di log
+*.log
+logs/
+*.out
+
+# File temporanei e di backup
+*.tmp
+*.swp
+*~
+
+# File di configurazione dell'IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# File di configurazione locali e sensibili
+.env
+.env.local
+.env.*
+!.env.example
+
+# Cartelle di build e dipendenze
+node_modules/
+dist/
+build/
+target/
+bin/
+obj/
+
+# File e cartelle di test
+coverage/
+*.lcov
+
+# File di sistema operativo
+ehthumbs.db
+Icon?
+Desktop.ini
+
+# Cartelle di versionamento
+.git/
+
+# File di configurazione Docker
+docker-compose.override.yml
